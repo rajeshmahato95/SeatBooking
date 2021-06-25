@@ -1,0 +1,74 @@
+@RequestMapping(value = "/book", method = RequestMethod.POST)
+  public ResponseEntity book(
+      final String riderId,
+      final Double sourceX,
+      final Double sourceY,
+      final Double destX,
+      final Double destY) {
+
+    tripsManager.createTrip(
+        ridersManager.getRider(riderId),
+        new Location(sourceX, sourceY),
+        new Location(destX, destY));
+
+    return ResponseEntity.ok("");
+  }
+  
+  
+  // rider manager
+  Map<String, Rider> riders = new HashMap<>();
+  public Rider getRider(@NonNull final String riderId) {
+    if (!riders.containsKey(riderId)) {
+      throw new RiderNotFoundException();
+    }
+    return riders.get(riderId);
+  }
+  
+  
+  // Trips manager
+  private Map<String, List<Trip>> trips = new HashMap<>();
+  
+   public void createTrip(
+      @NonNull final Rider rider,
+      @NonNull final Location fromPoint,
+      @NonNull final Location toPoint) {
+    final List<Cab> closeByCabs =
+        cabsManager.getCabs(fromPoint, MAX_ALLOWED_TRIP_MATCHING_DISTANCE);
+    final List<Cab> closeByAvailableCabs =
+        closeByCabs.stream()
+            .filter(cab -> cab.getCurrentTrip() == null)
+            .collect(Collectors.toList());
+
+    final Cab selectedCab =
+        cabMatchingStrategy.matchCabToRider(rider, closeByAvailableCabs, fromPoint, toPoint);
+    if (selectedCab == null) {
+      throw new NoCabsAvailableException();
+    }
+
+    final Double price = pricingStrategy.findPrice(fromPoint, toPoint);
+    final Trip newTrip = new Trip(rider, selectedCab, price, fromPoint, toPoint);
+    if (!trips.containsKey(rider.getId())) {
+      trips.put(rider.getId(), new ArrayList<>());
+    }
+    trips.get(rider.getId()).add(newTrip);
+    selectedCab.setCurrentTrip(newTrip);
+  }
+  
+  
+  
+  public List<Cab> getCabs(@NonNull final Location fromPoint, @NonNull final Double distance) {
+    List<Cab> result = new ArrayList<>();
+    for (Cab cab : cabs.values()) {
+      // TODO: Use epsilon comparison because of double
+      if (cab.getIsAvailable() && cab.getCurrentLocation().distance(fromPoint) <= distance) {
+        result.add(cab);
+      }
+    }
+    return result;
+  }
+  
+  //pricing strategy
+  public Double findPrice(Location fromPoint, Location toPoint) {
+    return fromPoint.distance(toPoint) * PER_KM_RATE;
+    }
+  

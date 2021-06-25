@@ -1,0 +1,119 @@
+public String createBooking(@NonNull final String userId, @NonNull final String showId,
+                                @NonNull final List<String> seatsIds) {
+        final Show show = showService.getShow(showId);
+        final List<Seat> seats = seatsIds.stream().map(theatreService::getSeat).collect(Collectors.toList());
+        return bookingService.createBooking(userId, show, seats).getId();
+    }
+    
+    
+    //Show service 
+    public class ShowService {
+
+    private final Map<String, Show> shows;
+
+    public ShowService() {
+        this.shows = new HashMap<>();
+    }
+
+    public Show getShow(@NonNull final String showId) {
+        if (!shows.containsKey(showId)) {
+            throw new NotFoundException();
+        }
+        return shows.get(showId);
+    }
+}
+
+
+// Theatre service
+
+public class TheatreService {
+
+    private final Map<String, Theatre> theatres;
+    private final Map<String, Screen> screens;
+    private final Map<String, Seat> seats;
+
+    public TheatreService() {
+        this.theatres = new HashMap<>();
+        this.screens = new HashMap<>();
+        this.seats = new HashMap<>();
+    }
+
+    public Seat getSeat(@NonNull final String seatId) {
+        if (!seats.containsKey(seatId)) {
+            throw new NotFoundException();
+        }
+        return seats.get(seatId);
+    }
+    }
+    
+    
+    // create booking(inside booking service)
+    
+     private final Map<String, Booking> showBookings;
+    private final SeatLockProvider seatLockProvider;
+    
+    public Booking createBooking(@NonNull final String userId, @NonNull final Show show,
+                                 @NonNull final List<Seat> seats) {
+        if (isAnySeatAlreadyBooked(show, seats)) {
+            throw new SeatPermanentlyUnavailableException();
+        }
+        seatLockProvider.lockSeats(show, seats, userId);
+        final String bookingId = UUID.randomUUID().toString();
+        final Booking newBooking = new Booking(bookingId, show, userId, seats);
+        showBookings.put(bookingId, newBooking);
+        return newBooking;
+        // TODO: Create timer for booking expiry
+    }
+    
+    //Seat already booked
+    
+    private boolean isAnySeatAlreadyBooked(final Show show, final List<Seat> seats) {
+        final List<Seat> bookedSeats = getBookedSeats(show);
+        for (Seat seat : seats) {
+            if (bookedSeats.contains(seat)) {
+                return true;
+            }
+        }
+        return false;
+    }
+    
+    public List<Seat> getBookedSeats(@NonNull final Show show) {
+        return getAllBookings(show).stream()
+                .filter(Booking::isConfirmed)
+                .map(Booking::getSeatsBooked)
+                .flatMap(Collection::stream)
+                .collect(Collectors.toList());
+    }
+    
+    
+    
+    
+    //locking seats 
+
+private final Map<Show, Map<Seat, SeatLock>> locks;
+
+    @Override
+    synchronized public void lockSeats(@NonNull final Show show, @NonNull final List<Seat> seats,
+                                       @NonNull final String user) {
+        for (Seat seat : seats) {
+            if (isSeatLocked(show, seat)) {
+                throw new SeatTemporaryUnavailableException();
+            }
+        }
+
+        for (Seat seat : seats) {
+            lockSeat(show, seat, user, lockTimeout);
+        }
+    }
+    
+    private boolean isSeatLocked(final Show show, final Seat seat) {
+        return locks.containsKey(show) && locks.get(show).containsKey(seat) && !locks.get(show).get(seat).isLockExpired();
+    }
+    
+    private void lockSeat(final Show show, final Seat seat, final String user, final Integer timeoutInSeconds) {
+        if (!locks.containsKey(show)) {
+            locks.put(show, new HashMap<>());
+        }
+        final SeatLock lock = new SeatLock(seat, show, timeoutInSeconds, new Date(), user);
+        locks.get(show).put(seat, lock);
+    }
